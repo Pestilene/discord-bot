@@ -21,6 +21,7 @@ def home():
 	return "Бот работает!"
 
 def run():
+	print("🌐 Flask сервер запущен на 0.0.0.0:8080")
 	app.run(host='0.0.0.0', port=8080)
 
 def keep_alive():
@@ -56,21 +57,18 @@ try:
 	with open("youtube_state.json", "r") as f:
 		state = json.load(f)
 		last_youtube_video_id = state.get("last_video_id")
-except Exception:
+except (FileNotFoundError, json.JSONDecodeError):
 	last_youtube_video_id = None
 
 with open("youtube_state.json", "w") as f:
 	json.dump({"last_video_id": last_youtube_video_id}, f)
 
-def is_valid_url(url):
+async def is_image_available(url):
 	try:
-		result = urlparse(url) 
-		if not all([result.scheme, result.netloc]):
-			return False
-		if not result.path.endswith(('.jpg', '.png', '.jpeg', '.gif')):
-			return False
-		return True
-	except Exception:
+		async with aiohttp.ClientSession() as session:
+			async with session.head(url) as resp:
+				return resp.status == 200
+	except:
 		return False
 
 async def fetch_youtube_rss():
@@ -123,7 +121,6 @@ async def get_latest_youtube_video(retry=3):
 
 async def is_twitch_stream_live():
     try:
-        from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor() as pool:
             streams = await bot.loop.run_in_executor(pool, streamlink.streams, f"https://twitch.tv/{TWITCH_USERNAME}")
         return bool(streams)
@@ -145,7 +142,7 @@ async def check_updates():
 
 		maxres_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
 		hq_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
-		thumbnail = maxres_url if is_valid_url(maxres_url) else hq_url
+		thumbnail = maxres_url if await is_image_available(maxres_url) else hq_url
 
 		embed = disnake.Embed(
 			title=new_video["title"],
@@ -184,6 +181,64 @@ async def check_updates():
 		logging.info(f"📢 Стрим в эфире: {TWITCH_USERNAME}")
 		twitch_stream_live = True
 
+
+@bot.command(name="проверка")
+async def manual_check(ctx):
+	await ctx.send("🔍 Выполняю ручную проверку обновлений...")
+
+	youtube_channel = bot.get_channel(YOUTUBE_CHANNEL_ID)
+	twitch_channel = bot.get_channel(TWITCH_CHANNEL_ID)
+
+	new_video = await get_latest_youtube_video()
+	if new_video and youtube_channel:
+		video_id = new_video["link"].split("v=")[-1]
+
+		maxres_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+		hq_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
+		thumbnail = maxres_url if await is_image_available(maxres_url) else hq_url
+
+		embed = disnake.Embed(
+			title=new_video["title"],
+			url=new_video["link"],
+			description="📽 Новое видео на канале!",
+		color=disnake.Color.red()
+		)
+		embed.set_image(url=thumbnail)
+
+		button = Button(label="📺 Перейти на канал", url="https://www.youtube.com/channel/UCGCE6j2NovYuhXIMlCPhHnQ", style=disnake.ButtonStyle.link)
+		view = View()
+		view.add_item(button)
+
+		await youtube_channel.send(content="@everyone", embed=embed, view=view)
+		await ctx.send("✅ Видео найдено и отправлено.")
+	else:
+		await ctx.send("ℹ️ Новых видео не найдено.")
+
+	is_live = await is_twitch_stream_live()
+	global twitch_stream_live
+	if is_live and not twitch_stream_live and twitch_channel:
+		stream_url = f"https://twitch.tv/{TWITCH_USERNAME}"
+
+		embed = disnake.Embed(
+			title=f"🔴 {TWITCH_USERNAME} в эфире!",
+			description="Залетай на стрим и пообщаемся 🎉",
+			url=stream_url,
+			color=disnake.Color.from_rgb(145, 70, 255)
+		)
+		embed.set_image(url="https://i.imgur.com/QZVjbl6.gif")
+
+		button = Button(label="🔴 Смотреть стрим", url=stream_url, style=disnake.ButtonStyle.link)
+		view = View()
+		view.add_item(button)
+
+		await twitch_channel.send(content="@everyone", embed=embed, view=view)
+		twitch_stream_live = True
+		await ctx.send("📡 Стрим в эфире! Уведомление отправлено.")
+	elif is_live:
+		await ctx.send("📡 Стрим уже идёт.")
+	else:
+		await ctx.send("📴 Стрим сейчас не идёт.")
+		
 
 @bot.event
 async def on_ready():
