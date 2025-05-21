@@ -244,11 +244,17 @@ async def manual_check(ctx):
 async def on_ready():
 	try:
 		print(f"✅ Бот {bot.user} запущен!")
-		check_updates.start()
+		if not check_updates.is_running():
+			check_updates.start()
 	except Exception as e:
 		logging.error(f"[Ошибка при запуске] {e}")
 
 
 if __name__ == "__main__":
 	keep_alive()
-	bot.run(os.getenv("DISCORD_TOKEN"))
+	token = os.getenv("DISCORD_TOKEN")
+	if not token:
+		logging.error("❌ Переменная окружения DISCORD_TOKEN не найдена.")
+		exit(1)
+
+bot.run(token)
