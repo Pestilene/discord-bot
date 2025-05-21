@@ -11,7 +11,21 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from disnake.ui import Button, View
+from aiohttp import web
 
+async def handle(request):
+	return web.Response(text="OK")
+
+async def run_webserver():
+	app = web.Application()
+	app.add_routes([web.get('/', handle)])
+
+	port = int(os.getenv("PORT", 8000))
+	runner = web.AppRunner(app)
+	await runner.setup()
+	site = web.TCPSite(runner, '0.0.0.0', port)
+	await site.start()
+	print(f"HTTP сервер запущен на порту {port}")
 
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
@@ -231,8 +245,7 @@ async def on_ready():
 		print(f"✅ Бот {bot.user} запущен!")
 		if not check_updates.is_running():
 			check_updates.start()
-	except Exception as e:
-		logging.error(f"[Ошибка при запуске] {e}")
+	    bot.loop.create_task(run_webserver())
 
 
 if __name__ == "__main__":
