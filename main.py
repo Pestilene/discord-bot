@@ -11,6 +11,21 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from disnake.ui import Button, View
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+
+@app.route('/')
+def home():
+	return "Бот работает!"
+
+def run():
+	app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+	server = Thread(target=run)
+	server.start()
 
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
@@ -180,4 +195,5 @@ async def on_ready():
 
 
 if __name__ == "__main__":
-	bot.run(DISCORD_TOKEN)
+	keep_alive()
+	bot.run(os.getenv("DISCORD_TOKEN"))
