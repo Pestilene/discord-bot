@@ -8,9 +8,11 @@ from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ThreadPoolExecutor
 import json
 import asyncio
+import os
+from donenv import load_dotenv
 
-
-DISCORD_TOKEN = "MTM3NDM4MjkyMzQ0ODQ1NTIwOA.G0_sTB.sLP9JkYb1hr-JCe0wJww99yj6_1bDTTCmfzAnY"
+load_dotenv()
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 YOUTUBE_CHANNEL_ID = 1374412160939196476
 TWITCH_CHANNEL_ID = 1374434150395940965
 YOUTUBE_CHANNEL_RSS = "https://www.youtube.com/feeds/videos.xml?channel_id=UCGCE6j2NovYuhXIMlCPhHnQ"
@@ -131,8 +133,8 @@ async def check_updates():
 		embed = disnake.Embed(
 			title="🔔 **Новое видео на YouTube!**",
 			url=new_video["link"],
-			description="_Смотрите прямо сейчас!_",
-			color=disnake.Color.yellow()
+			description="🔥 СМОТРИТЕ ПРЯМО СЕЙЧАС 🔥",
+			color=disnake.Color.gold()
 		)
 
 		embed.set_image(url=thumbnail)
@@ -154,9 +156,9 @@ async def check_updates():
 		)
 
 		
-		embed.set_footer(text="Автоматическое уведомление")
+		embed.set_footer(text="📌 Это автоматическое уведомление")
 
-		await youtube_channel.send("@everyone", embed=embed)
+		await youtube_channel.send("@everyone 🚨 Новое видео доступно!")
 		logging.info(f"📢 Отправлено уведомление о новом видео: {new_video['title']}")
 		last_youtube_video_id = video_id
 
@@ -165,19 +167,20 @@ async def check_updates():
 		stream_url = f"https://twitch.tv/ {TWITCH_USERNAME}"
 
 		embed = disnake.Embed(
-			title="🔴 **Стрим начался!**",
+			title="🔴 **СТРИМ НАЧАЛСЯ!** 🔴",
 			url=stream_url,
-			description="_Стример онлайн! Присоединяйтесь!_",
-			color=disnake.Color.purple()
+			description="🟢 БЫСТРО ПРИСОЕДИНЯЙТЕСЬ К ЭФИРУ! 🟢",
+			color=disnake.Color.red()
 		)
 
 		embed.set_author(
 			name="Twitch",
-			icon_url="https://static-cdn.jtvnw.net/jtv_user_pictures/a500227c-ea24-448f-aa21-911ee63bfa53-profile_image-70x70.png"
+			icon_url="https://static-cdn.jtvnw.net/jtv_user_pictures/a500227c-ea24-448f-aa21-911ee63bfa53-profile_image-70x70.png "
 		)
 
 		embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/3366/3366069.png ")
-		
+		embed.set_image(url="https://i.imgur.com/QZVjbl6.gif ")
+
 		embed.add_field(
 			name="🎮 Стримит пользователь:",
 			value=f"**{TWITCH_USERNAME}**",
@@ -200,7 +203,7 @@ async def check_updates():
 
 		embed.set_footer(text="Автоматическое уведомление • Присоединяйтесь!")
 
-		await twitch_channel.send("@everyone", embed=embed)
+		await twitch_channel.send("@everyone 🚨 В ЭФИРЕ СТРИМ!", embed=embed)
 		logging.info(f"📢 {TWITCH_USERNAME} начал стрим!")
 		twitch_stream_live = True
 
