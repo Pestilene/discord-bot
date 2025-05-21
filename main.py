@@ -10,6 +10,7 @@ import json
 import asyncio
 import os
 from dotenv import load_dotenv
+from disnake.ui import Button, View
 
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
@@ -28,6 +29,7 @@ logging.basicConfig(
 
 
 intents = disnake.Intents.default()
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
@@ -125,81 +127,45 @@ async def check_updates():
 	new_video = await get_latest_youtube_video()
 	if new_video and youtube_channel:
 		video_id = new_video["link"].split("v=")[-1]
-		thumbnail = get_youtube_thumbnail(video_id)
 
-		if not is_valid_url(thumbnail):
-			logging.warning("❌ Некорректный URL для миниатюры")
-			thumbnail = disnake.Embed.Empty
+		maxres_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+		hq_url = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
+		thumbnail = maxres_url if is_valid_url(maxres_url) else hq_url
 
 		embed = disnake.Embed(
-			title="🎬 **Новое видео на канале!**",
+			title=new_video["title"],
 			url=new_video["link"],
-			description=(
-				f"📣 **{new_video['title']}**\n"
-				"✨ Только что вышло свежее видео! Не пропусти 🔥\n\n"
-				"👇 Нажми ниже, чтобы посмотреть 👇"
-			),
+			description="📽 Новое видео на канале!",
 			color=disnake.Color.red()
 		)
 
 		embed.set_image(url=thumbnail)
-		embed.set_author(
-			name="YouTube | Новый контент!",
-			icon_url="https://upload.wikimedia.org/wikipedia/commons/7/75/YouTube_icon_%282013_2017%29.svg"
-		)
-		
-		embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/1384/1384060.png")
-		embed.set_image(url=thumbnail)
 
-		embed.add_field(
-			name="🔗 Ссылка на просмотр",
-			value=f"[📺 Смотреть на YouTube]({new_video['link']})",
-			inline=False
-		)
+		button = Button(label="📺 Перейти на канал", url="https://www.youtube.com/channel/UCGCE6j2NovYuhXIMlCPhHnQ", style=disnake.ButtonStyle.link)
+		view = View()
+		view.add_item(button)
 
-		embed.add_field(
-			name="📌 Рекомендуется к просмотру",
-			value="👍 Поставь лайк и подпишись!",
-			inline=True
-		)
-
-		embed.set_footer(
-			text="📢 Автоматическое уведомление о новом видео", 
-			icon_url="https://cdn-icons-png.flaticon.com/512/2088/2088617.png"
-		)
-
-		await youtube_channel.send("@everyone 🎥 **НОВЫЙ ВИДОС ПОДЪЕХАЛ!**", embed=embed)
-		logging.info(f"📢 Уведомление отправлено: {new_video['title']}")
+		await youtube_channel.send(content="@everyone", embed=embed, view=view)
+		logging.info(f"📢 Отправлено новое видео: {new_video['title']}")
 
 	is_live = await is_twitch_stream_live()
 	if is_live and not twitch_stream_live and twitch_channel:
 		stream_url = f"https://twitch.tv/{TWITCH_USERNAME}"
 
 		embed = disnake.Embed(
-			title="🔴 **СТРИМ НАЧАЛСЯ!**",
-			description="💬 Включайся в чат и залетай на стрим! 🎉",
+			title=f"🔴 {TWITCH_USERNAME} в эфире!",
+			description="Залетай на стрим и пообщаемся 🎉",
 			url=stream_url,
 			color=disnake.Color.from_rgb(145, 70, 255)
 		)
 
-		embed.set_author(
-			name=f"🎮 {TWITCH_USERNAME} в эфире!",
-			icon_url="https://static-cdn.jtvnw.net/jtv_user_pictures/a500227c-ea24-448f-aa21-911ee63bfa53-profile_image-70x70.png"
-		)
+		embed.set_image(url="https://i.imgur.com/QZVjbl6.gif")	  #   GIF баннер
 
-		embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/2111/2111668.png")
-		embed.set_image(url="https://i.imgur.com/QZVjbl6.gif")
+		button = Button(label="🔴 Смотреть стрим", url=stream_url, style=disnake.ButtonStyle.link)
+		view = View()
+		view.add_item(button)
 
-		embed.add_field(name="📺 Категория", value="Just Chatting / Игра", inline=True)
-		embed.add_field(name="📡 Прямая ссылка", value=f"[🔴 Смотреть стрим]({stream_url})", inline=True)
-		embed.add_field(name="💬 Общение", value="Задавай вопросы, участвуй в чате!", inline=False)
-
-		embed.set_footer(
-			text="Автоматическое уведомление • Присоединяйтесь!",
-			icon_url="https://cdn-icons-png.flaticon.com/512/5968/5968835.png"
-		)
-
-		await twitch_channel.send("@everyone 🎙️ **ПРЯМОЙ ЭФИР НАЧАЛСЯ!**", embed=embed)
+		await twitch_channel.send(content="@everyone", embed=embed, view=view)
 		logging.info(f"📢 Стрим в эфире: {TWITCH_USERNAME}")
 		twitch_stream_live = True
 
