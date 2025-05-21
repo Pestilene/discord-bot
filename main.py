@@ -11,22 +11,7 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from disnake.ui import Button, View
-from flask import Flask
-from threading import Thread
 
-app = Flask('')
-
-@app.route('/')
-def home():
-	return "Бот работает!"
-
-def run():
-	print("🌐 Flask сервер запущен на 0.0.0.0:8080")
-	app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-	server = Thread(target=run)
-	server.start()
 
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
@@ -251,7 +236,6 @@ async def on_ready():
 
 
 if __name__ == "__main__":
-	keep_alive()
 	token = os.getenv("DISCORD_TOKEN")
 	if not token:
 		logging.error("❌ Переменная окружения DISCORD_TOKEN не найдена.")
