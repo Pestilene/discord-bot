@@ -24,7 +24,7 @@ PORT = int(os.getenv("PORT", 8000))
 YOUTUBE_CHANNEL_ID = 1374412160939196476
 TWITCH_CHANNEL_ID = 1374434150395940965
 YOUTUBE_CHANNEL_RSS = "https://www.youtube.com/feeds/videos.xml?channel_id=UCGCE6j2NovYuhXIMlCPhHnQ"
-TWITCH_USERNAME = "xkamysh"
+TWITCH_USERNAME = "xKamysh"
 CHECK_INTERVAL_MINUTES = 5
 
 
@@ -37,23 +37,29 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 last_youtube_video_id = None
+last_video_title = None
 twitch_stream_live = False
 
 
 STATE_FILE = "youtube_state.json"
 
 def load_state():
-	global last_youtube_video_id
+	global last_youtube_video_id, last_video_title
 	try:
-		with open(STATE_FILE "r") as f:
+		with open(STATE_FILE, "r") as f:
 			state = json.load(f)
 			last_youtube_video_id = state.get("last_video_id")
+			last_video_title = state.get("last_video_title")
 	except (FileNotFoundError, json.JSONDecodeError):
 		last_youtube_video_id = None
+		last_video_title = None
 
 def save_state():
 	with open(STATE_FILE, "w") as f:
-		json.dump({"last_video_id": last_youtube_video_id}, f)
+		json.dump({
+			"last_video_id": last_youtube_video_id, 
+			"last_video_title": last_video_title
+		}, f)
 
 load_state()
 save_state()
@@ -83,7 +89,7 @@ def extract_video_id(link):
 
 
 async def get_latest_youtube_video(retry=3):
-	global last_youtube_video_id
+	global last_youtube_video_id, last_video_title
 	for attempt in range(retry):
 		try:
 			feed = await fetch_youtube_rss()
@@ -107,8 +113,13 @@ async def get_latest_youtube_video(retry=3):
 
 			if video_id != last_youtube_video_id:
 				last_youtube_video_id = video_id
+				last_video_title = title
 				save_state()
 				return {"title": title, "link": link}
+			else:
+
+				if not last_video_title:
+					last_video_title = title
 			return None
 		except Exception as e:
 			logging.error(f"[Ошибка YouTube] {e}")
@@ -117,14 +128,14 @@ async def get_latest_youtube_video(retry=3):
 
 
 async def is_twitch_stream_live():
-    try:
-        with ThreadPoolExecutor() as pool:
-            streams = await bot.loop.run_in_executor(pool, streamlink.streams, f"https://twitch.tv/{TWITCH_USERNAME}")
-            executor = ThreadPoolExecutor(max_workers=2)
-        return bool(streams)
-    except Exception as e:
-        logging.warning(f"[Ошибка проверки Twitch] {e}")
-        return False
+	try:
+		loop = asyncio.get_running_loop()
+		with ThreadPoolExecutor() as pool:
+			streams = await loop.run_in_executor(pool, streamlink.streams, f"https://twitch.tv/{TWITCH_USERNAME}")
+		return bool(streams)
+	except Exception as e:
+		logging.warning(f"[Ошибка проверки Twitch] {e}")
+		return False
 
 async def send_youtube_notification(channel, video):
 	video_id = extract_video_id(video["link"])
@@ -133,16 +144,16 @@ async def send_youtube_notification(channel, video):
 		thumbnail = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
 
 	embed = disnake.Embed(
-		title=video["title"],
+		title=f"✨ Новое видео: {video['title']}",
 		url=video["link"],
-		description="📽 Новое видео на канале!",
-		color=disnake.Color.red()
+		description="🔔 На канале вышел свежий ролик — зацени первым!",
+		color=disnake.Color.from_rgb(229, 57, 53)
 	)
 	embed.set_image(url=thumbnail)
 
 	view = View()
 	view.add_item(Button(label="💬 Telegram", url="https://t.me/kamyshovnik", style=disnake.ButtonStyle.link))
-	view.add_item(Button(label="📘 Группа ВК", url="https://vk.com/kamyshovnik", style=disnake.ButtonStyle.link))
+	view.add_item(Button(label="📘 VK", url="https://vk.com/kamyshovnik", style=disnake.ButtonStyle.link))
 	view.add_item(Button(label="🎵 TikTok", url="https://www.tiktok.com/@xkamysh", style=disnake.ButtonStyle.link))
 	view.add_item(Button(label="💖 Boosty", url="https://boosty.to/xkamysh", style=disnake.ButtonStyle.link))
 
@@ -155,16 +166,17 @@ async def send_twitch_notification(channel):
 	stream_url = f"https://twitch.tv/{TWITCH_USERNAME}"
 
 	embed = disnake.Embed(
-		title=f"🔴 {TWITCH_USERNAME} в эфире!",
-		description="Залетай на стрим и пообщаемся 🎉",
+		title=f"🔴 {TWITCH_USERNAME} сейчас стримит!",
 		url=stream_url,
-		color=disnake.Color.from_rgb(145, 70, 255)
+		description="🎉 Заходи на эфир! Общение, атмосфера и веселье ждут тебя!",
+		color=disnake.Color.from_rgb(138, 43, 226)
 	)
 	embed.set_image(url="https://i.imgur.com/QZVjbl6.gif")
+	embed.set_footer(text="Twitch • Камыш", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
 
 	view = View()
 	view.add_item(Button(label="💬 Telegram", url="https://t.me/kamyshovnik", style=disnake.ButtonStyle.link))
-	view.add_item(Button(label="📘 Группа ВК", url="https://vk.com/kamyshovnik", style=disnake.ButtonStyle.link))
+	view.add_item(Button(label="📘 VK", url="https://vk.com/kamyshovnik", style=disnake.ButtonStyle.link))
 	view.add_item(Button(label="🎵 TikTok", url="https://www.tiktok.com/@xkamysh", style=disnake.ButtonStyle.link))
 	view.add_item(Button(label="💖 Boosty", url="https://boosty.to/xkamysh", style=disnake.ButtonStyle.link))
 
@@ -184,8 +196,13 @@ async def check_updates():
 		await send_youtube_notification(yt_channel, new_video)
 
 	is_live = await is_twitch_stream_live()
+
 	if is_live and not twitch_stream_live and tw_channel:
 		await send_twitch_notification(tw_channel)
+	elif not is_live:
+		twitch_stream_live = False
+
+	await update_presence(is_live)
 
 
 @bot.command(name="проверка")
@@ -195,6 +212,10 @@ async def manual_check(ctx):
 
 	yt_channel = bot.get_channel(YOUTUBE_CHANNEL_ID)
 	tw_channel = bot.get_channel(TWITCH_CHANNEL_ID)
+
+	if yt_channel is None or tw_channel is None:
+		await ctx.send("❌ Не могу получить нужные каналы для уведомлений.")
+		return
 
 	new_video = await get_latest_youtube_video()
 	if new_video and yt_channel:
@@ -220,6 +241,19 @@ async def on_ready():
 		check_updates.start()
 	bot.loop.create_task(run_webserver())
 
+
+async def update_presence(is_live):
+	if is_live:
+		activity = disnake.activity(
+			type=disnake.ActivityType.watching,
+			name="xKamysh"
+		)
+	else:
+		activity = disnake.Activity(
+			type=disnake.ActivityType.watching,
+			name="xKamysh"
+		)
+	await bot.change_presence(activity=activity)
 
 
 async def handle(request):
