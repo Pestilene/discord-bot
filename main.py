@@ -241,4 +241,4 @@ if __name__ == "__main__":
 		logging.error("❌ Переменная окружения DISCORD_TOKEN не найдена.")
 		exit(1)
 
-bot.run(token)
+	bot.run(token)
