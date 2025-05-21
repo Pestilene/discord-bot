@@ -1,0 +1,5 @@
+disnake
+feedparser
+aiohttp
+streamlink
+python-dotenv
