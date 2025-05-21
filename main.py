@@ -45,7 +45,7 @@ STATE_FILE = "youtube_state.json"
 def load_state():
 	global last_youtube_video_id
 	try:
-		with open("youtube_state.json", "r") as f:
+		with open(STATE_FILE "r") as f:
 			state = json.load(f)
 			last_youtube_video_id = state.get("last_video_id")
 	except (FileNotFoundError, json.JSONDecodeError):
@@ -64,7 +64,8 @@ async def is_image_available(url):
 		async with aiohttp.ClientSession() as session:
 			async with session.head(url) as resp:
 				return resp.status == 200
-	except:
+	except Exception as e:
+		logging.error(f"[Ошибка изображения] {e}")
 		return False
 
 async def fetch_youtube_rss():
@@ -119,6 +120,7 @@ async def is_twitch_stream_live():
     try:
         with ThreadPoolExecutor() as pool:
             streams = await bot.loop.run_in_executor(pool, streamlink.streams, f"https://twitch.tv/{TWITCH_USERNAME}")
+            executor = ThreadPoolExecutor(max_workers=2)
         return bool(streams)
     except Exception as e:
         logging.warning(f"[Ошибка проверки Twitch] {e}")
@@ -139,7 +141,7 @@ async def send_youtube_notification(channel, video):
 	embed.set_image(url=thumbnail)
 
 	view = View()
-	view.add_item(Button(label="💬 Telegram", url="https://t.me/kamyshovnik", style=disnake.ButtonStyle.link)
+	view.add_item(Button(label="💬 Telegram", url="https://t.me/kamyshovnik", style=disnake.ButtonStyle.link))
 	view.add_item(Button(label="📘 Группа ВК", url="https://vk.com/kamyshovnik", style=disnake.ButtonStyle.link))
 	view.add_item(Button(label="🎵 TikTok", url="https://www.tiktok.com/@xkamysh", style=disnake.ButtonStyle.link))
 	view.add_item(Button(label="💖 Boosty", url="https://boosty.to/xkamysh", style=disnake.ButtonStyle.link))
@@ -161,11 +163,10 @@ async def send_twitch_notification(channel):
 	embed.set_image(url="https://i.imgur.com/QZVjbl6.gif")
 
 	view = View()
-	view.add_item(button(label="💬 Telegram", url="https://t.me/kamyshovnik", style=disnake.ButtonStyle.link)
-	view.add_item(button(label="📘 Группа ВК", url="https://vk.com/kamyshovnik", style=disnake.ButtonStyle.link))
-	view.add_item(button(label="🎵 TikTok", url="https://www.tiktok.com/@xkamysh", style=disnake.ButtonStyle.link))
-	view.add_item(button(label="💖 Boosty", url="https://boosty.to/xkamysh", style=disnake.ButtonStyle.link))
-
+	view.add_item(Button(label="💬 Telegram", url="https://t.me/kamyshovnik", style=disnake.ButtonStyle.link))
+	view.add_item(Button(label="📘 Группа ВК", url="https://vk.com/kamyshovnik", style=disnake.ButtonStyle.link))
+	view.add_item(Button(label="🎵 TikTok", url="https://www.tiktok.com/@xkamysh", style=disnake.ButtonStyle.link))
+	view.add_item(Button(label="💖 Boosty", url="https://boosty.to/xkamysh", style=disnake.ButtonStyle.link))
 
 	await channel.send(content="@everyone", embed=embed, view=view)
 	logging.info(f"📢 Стрим в эфире: {TWITCH_USERNAME}")	
@@ -189,6 +190,7 @@ async def check_updates():
 
 @bot.command(name="проверка")
 async def manual_check(ctx):
+	global twitch_stream_live
 	await ctx.send("🔍 Выполняю ручную проверку обновлений...")
 
 	yt_channel = bot.get_channel(YOUTUBE_CHANNEL_ID)
@@ -202,7 +204,6 @@ async def manual_check(ctx):
 		await ctx.send("ℹ️ Новых видео не найдено.")
 
 	is_live = await is_twitch_stream_live()
-	global twitch_stream_live
 	if is_live and not twitch_stream_live and tw_channel:
 		await send_twitch_notification(tw_channel)
 		await ctx.send("📡 Стрим в эфире! Уведомление отправлено.")
