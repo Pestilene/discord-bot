@@ -3,3 +3,4 @@ feedparser
 aiohttp
 streamlink
 python-dotenv
+PyNaCl
