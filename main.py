@@ -87,7 +87,7 @@ async def get_latest_youtube_video(retry=3):
 		try:
 			feed = await fetch_youtube_rss()
 			if not feed or not feed.entries:
-				logging.warning(f"❌ Нет записей в YouTube RSS (попытка {i+1}/{retry})")
+				logging.warning(f"❌ Нет записей в YouTube RSS (попытка {attempt+1}/{retry})")
 				await asyncio.sleep(10)
 				continue
 			
@@ -106,6 +106,7 @@ async def get_latest_youtube_video(retry=3):
 
 			if video_id != last_youtube_video_id:
 				last_youtube_video_id = video_id
+				save_state()
 				return {"title": title, "link": link}
 			return None
 		except Exception as e:
@@ -137,9 +138,11 @@ async def send_youtube_notification(channel, video):
 	)
 	embed.set_image(url=thumbnail)
 
-	button = Button(label="📺 Перейти на канал", url="https://www.youtube.com/channel/UCGCE6j2NovYuhXIMlCPhHnQ", style=disnake.ButtonStyle.link)
 	view = View()
-	view.add_item(button)
+	view.add_item(Button(label="💬 Telegram", url="https://t.me/kamyshovnik", style=disnake.ButtonStyle.link)
+	view.add_item(Button(label="📘 Группа ВК", url="https://vk.com/kamyshovnik", style=disnake.ButtonStyle.link))
+	view.add_item(Button(label="🎵 TikTok", url="https://www.tiktok.com/@xkamysh", style=disnake.ButtonStyle.link))
+	view.add_item(Button(label="💖 Boosty", url="https://boosty.to/xkamysh", style=disnake.ButtonStyle.link))
 
 	await channel.send(content="@everyone", embed=embed, view=view)
 	logging.info(f"📢 Отправлено новое видео: {video['title']}")
@@ -157,9 +160,12 @@ async def send_twitch_notification(channel):
 	)
 	embed.set_image(url="https://i.imgur.com/QZVjbl6.gif")
 
-	button = Button(label="🔴 Смотреть стрим", url=stream_url, style=disnake.ButtonStyle.link)
 	view = View()
-	view.add_item(button)
+	view.add_item(button(label="💬 Telegram", url="https://t.me/kamyshovnik", style=disnake.ButtonStyle.link)
+	view.add_item(button(label="📘 Группа ВК", url="https://vk.com/kamyshovnik", style=disnake.ButtonStyle.link))
+	view.add_item(button(label="🎵 TikTok", url="https://www.tiktok.com/@xkamysh", style=disnake.ButtonStyle.link))
+	view.add_item(button(label="💖 Boosty", url="https://boosty.to/xkamysh", style=disnake.ButtonStyle.link))
+
 
 	await channel.send(content="@everyone", embed=embed, view=view)
 	logging.info(f"📢 Стрим в эфире: {TWITCH_USERNAME}")	
@@ -189,7 +195,7 @@ async def manual_check(ctx):
 	tw_channel = bot.get_channel(TWITCH_CHANNEL_ID)
 
 	new_video = await get_latest_youtube_video()
-	if new_video and youtube_channel:
+	if new_video and yt_channel:
 		await send_youtube_notification(yt_channel, new_video)
 		await ctx.send("✅ Видео найдено и отправлено.")
 	else:
