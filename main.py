@@ -248,11 +248,13 @@ async def update_presence(is_live):
 			type=disnake.ActivityType.watching,
 			name="xKamysh"
 		)
+	else:
+		activity = None
 	await bot.change_presence(activity=activity)
 
 
 async def handle(request):
-	return web.response(text="ОК")
+	return web.Response(text="ОК")
 
 
 async def run_webserver():
