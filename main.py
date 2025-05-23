@@ -64,7 +64,7 @@ def load_state():
 		logging.info("Файл состояния не найден или повреждён, состояние сброшено.")
 
 def save_state():
-	global last_youtube_video_id, last_video_title
+	global last_youtube_video_id, last_video_title, last_youtube_video_sent_time
 	try:
 		with open(STATE_FILE, "w") as f:
 			json.dump({
