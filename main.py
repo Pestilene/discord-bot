@@ -41,7 +41,11 @@ STATE_FILE = "youtube_state.json"
 
 last_youtube_video_id = None
 last_video_title = None
+last_youtube_video_sent_time = 0 
 twitch_stream_live = False
+
+
+send_lock = asyncio.Lock()
 
 
 def load_state():
@@ -130,6 +134,8 @@ async def get_latest_youtube_video(retry=3):
 			return None
 		except Exception as e:
 			logging.error(f"[Ошибка YouTube] {e}")
+			last_youtube_video_id = None
+			last_video_title = None
 			await asyncio.sleep(10)
 	return None
 
@@ -159,6 +165,16 @@ def create_social_buttons() -> View:
 
 
 async def send_youtube_notification(channel, video):
+	global last_youtube_video_sent_time
+	async with send_lock:
+		import time
+		now = time.time()
+		video_id = extract_video_id(video["link"])
+		if video_id["link"].endswitch(last_youtube_video_id) and (now - last_youtube_video_sent_time < 300):
+			logging.info("Повторное видео не отправляется из-за ограничения по времени.")
+			return
+		last_youtube_video_sent_time = now
+
 	video_id = extract_video_id(video["link"])
 	thumbnail = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
 	if not await is_image_available(thumbnail):
