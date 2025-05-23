@@ -36,12 +36,13 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
+STATE_FILE = "youtube_state.json"
+
+
 last_youtube_video_id = None
 last_video_title = None
 twitch_stream_live = False
 
-
-STATE_FILE = "youtube_state.json"
 
 def load_state():
 	global last_youtube_video_id, last_video_title
@@ -50,19 +51,26 @@ def load_state():
 			state = json.load(f)
 			last_youtube_video_id = state.get("last_video_id")
 			last_video_title = state.get("last_video_title")
+			logging.info(f"Состояние загружено: {last_youtube_video_id}, {last_video_title}")
 	except (FileNotFoundError, json.JSONDecodeError):
 		last_youtube_video_id = None
 		last_video_title = None
+		logging.info("Файл состояния не найден или повреждён, состояние сброшено.")
 
 def save_state():
-	with open(STATE_FILE, "w") as f:
-		json.dump({
-			"last_video_id": last_youtube_video_id, 
-			"last_video_title": last_video_title
-		}, f)
+	global last_youtube_video_id, last_video_title
+	try:
+		with open(STATE_FILE, "w") as f:
+			json.dump({
+				"last_video_id": last_youtube_video_id, 
+				"last_video_title": last_video_title
+			}, f)
+		logging.info(f"Состояние сохранено: {last_youtube_video_id}, {last_video_title}")
+	except Exception as e:
+		logging.error(f"Ошибка сохранения состояния: {e}")
+
 
 load_state()
-save_state()
 
 
 async def is_image_available(url):
@@ -83,7 +91,7 @@ async def fetch_youtube_rss():
 				return feedparser.parse(text)
 	return None
 
-def extract_video_id(link):
+def extract_video_id(link: str) -> str | None:
 	parsed = urlparse(link)
 	return parse_qs(parsed.query).get("v", [None])[0]
 
@@ -99,11 +107,7 @@ async def get_latest_youtube_video(retry=3):
 				continue
 			
 			entry = feed.entries[0]
-			logging.info(f"Найдено видео: {entry.title}")
-
-			url_parsed = urlparse(entry.link)
-			video_id = parse_qs(url_parsed.query).get("v", [None])[0]
-
+			video_id = extract_video_id(entry.link)
 			if not video_id:
 				logging.warning("❌ Не удалось извлечь video_id")
 				return None
@@ -117,7 +121,6 @@ async def get_latest_youtube_video(retry=3):
 				save_state()
 				return {"title": title, "link": link}
 			else:
-
 				if not last_video_title:
 					last_video_title = title
 			return None
@@ -127,7 +130,7 @@ async def get_latest_youtube_video(retry=3):
 	return None
 
 
-async def is_twitch_stream_live():
+async def is_twitch_stream_live() -> bool:
 	try:
 		loop = asyncio.get_running_loop()
 		with ThreadPoolExecutor() as pool:
@@ -136,6 +139,20 @@ async def is_twitch_stream_live():
 	except Exception as e:
 		logging.warning(f"[Ошибка проверки Twitch] {e}")
 		return False
+
+
+def create_social_buttons() -> View:
+	view = View()
+	links = {
+		"💬 Telegram": "https://t.me/kamyshovnik",
+		"📘 VK": "https://vk.com/kamyshovnik",
+		"🎵 TikTok": "https://www.tiktok.com/@xkamysh",
+		"💖 Boosty": "https://boosty.to/xkamysh",
+	}
+	for label, url in links.items():
+		view.add_item(Button(label=label, url=url, style=disnake.ButtonStyle.link))
+	return view
+
 
 async def send_youtube_notification(channel, video):
 	video_id = extract_video_id(video["link"])
@@ -150,14 +167,7 @@ async def send_youtube_notification(channel, video):
 		color=disnake.Color.from_rgb(229, 57, 53)
 	)
 	embed.set_image(url=thumbnail)
-
-	view = View()
-	view.add_item(Button(label="💬 Telegram", url="https://t.me/kamyshovnik", style=disnake.ButtonStyle.link))
-	view.add_item(Button(label="📘 VK", url="https://vk.com/kamyshovnik", style=disnake.ButtonStyle.link))
-	view.add_item(Button(label="🎵 TikTok", url="https://www.tiktok.com/@xkamysh", style=disnake.ButtonStyle.link))
-	view.add_item(Button(label="💖 Boosty", url="https://boosty.to/xkamysh", style=disnake.ButtonStyle.link))
-
-	await channel.send(content="@everyone", embed=embed, view=view)
+	await channel.send(content="@everyone", embed=embed, view=create_social_buttons())
 	logging.info(f"📢 Отправлено новое видео: {video['title']}")
 
 
@@ -173,14 +183,7 @@ async def send_twitch_notification(channel):
 	)
 	embed.set_image(url="https://i.imgur.com/QZVjbl6.gif")
 	embed.set_footer(text="Twitch • Камыш", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
-
-	view = View()
-	view.add_item(Button(label="💬 Telegram", url="https://t.me/kamyshovnik", style=disnake.ButtonStyle.link))
-	view.add_item(Button(label="📘 VK", url="https://vk.com/kamyshovnik", style=disnake.ButtonStyle.link))
-	view.add_item(Button(label="🎵 TikTok", url="https://www.tiktok.com/@xkamysh", style=disnake.ButtonStyle.link))
-	view.add_item(Button(label="💖 Boosty", url="https://boosty.to/xkamysh", style=disnake.ButtonStyle.link))
-
-	await channel.send(content="@everyone", embed=embed, view=view)
+	await channel.send(content="@everyone", embed=embed, view=create_social_buttons())
 	logging.info(f"📢 Стрим в эфире: {TWITCH_USERNAME}")	
 	twitch_stream_live = True
 
@@ -191,18 +194,20 @@ async def check_updates():
 	yt_channel = bot.get_channel(YOUTUBE_CHANNEL_ID)
 	tw_channel = bot.get_channel(TWITCH_CHANNEL_ID)
 
-	new_video = await get_latest_youtube_video()
-	if new_video and yt_channel:
-		await send_youtube_notification(yt_channel, new_video)
+	if yt_channel:
+		new_video = await get_latest_youtube_video()
+		if new_video:
+			await send_youtube_notification(yt_channel, new_video)
 
 	is_live = await is_twitch_stream_live()
-
-	if is_live and not twitch_stream_live and tw_channel:
-		await send_twitch_notification(tw_channel)
-	elif not is_live:
-		twitch_stream_live = False
+	if tw_channel:
+		if is_live and not twitch_stream_live:
+			await send_twitch_notification(tw_channel)
+		elif not is_live
+			twitch_stream_live = False
 
 	await update_presence(is_live)
+
 
 
 @bot.command(name="проверка")
@@ -242,14 +247,10 @@ async def on_ready():
 	bot.loop.create_task(run_webserver())
 
 
-async def update_presence(is_live):
+async def update_presence(is_live: bool):
+	activity = None
 	if is_live:
-		activity = disnake.Activity(
-			type=disnake.ActivityType.watching,
-			name="xKamysh"
-		)
-	else:
-		activity = None
+		activity = disnake.Activity(type=disnake.ActivityType.watching, name="xKamysh")
 	await bot.change_presence(activity=activity)
 
 
