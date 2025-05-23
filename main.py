@@ -49,16 +49,18 @@ http_session = None
 
 
 def load_state():
-	global last_youtube_video_id, last_video_title
+	global last_youtube_video_id, last_video_title, last_youtube_video_sent_time
 	try:
 		with open(STATE_FILE, "r") as f:
 			state = json.load(f)
 			last_youtube_video_id = state.get("last_video_id")
 			last_video_title = state.get("last_video_title")
+			last_youtube_video_sent_time = state.get("last_sent_time", 0)
 			logging.info(f"Состояние загружено: {last_youtube_video_id}, {last_video_title}")
 	except (FileNotFoundError, json.JSONDecodeError):
 		last_youtube_video_id = None
 		last_video_title = None
+		last_youtube_video_sent_time = 0
 		logging.info("Файл состояния не найден или повреждён, состояние сброшено.")
 
 def save_state():
@@ -67,7 +69,8 @@ def save_state():
 		with open(STATE_FILE, "w") as f:
 			json.dump({
 				"last_video_id": last_youtube_video_id, 
-				"last_video_title": last_video_title
+				"last_video_title": last_video_title,
+				"last_sent_time": last_youtube_video_sent_time
 			}, f)
 		logging.info(f"Состояние сохранено: {last_youtube_video_id}, {last_video_title}")
 	except Exception as e:
@@ -169,6 +172,7 @@ async def send_youtube_notification(channel, video):
 			logging.info("Повторное видео не отправляется из-за ограничения по времени.")
 			return
 		last_youtube_video_sent_time = now
+		save_state()
 
 		thumbnail = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
 		if not await is_image_available(thumbnail):
@@ -195,7 +199,7 @@ async def send_twitch_notification(channel):
 		description="🎉 Заходи на эфир! Общение, атмосфера и веселье ждут тебя!",
 		color=disnake.Color.from_rgb(138, 43, 226)
 	)
-	embed.set_image(url="https://i.imgur.com/QZVjbl6.gif")
+	embed.set_image(url="https://media.tenor.com/cXxyLBfDOUgAAAAi/streaming-twitch.gif")
 	embed.set_footer(text="Twitch • Камыш", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
 	await channel.send(content="@everyone", embed=embed, view=create_social_buttons())
 	logging.info(f"📢 Стрим в эфире: {TWITCH_USERNAME}")	
@@ -258,6 +262,30 @@ async def manual_check(ctx):
 		await ctx.send("📡 Стрим уже идёт.")
 	else:
 		await ctx.send("📴 Стрим сейчас не идёт.")
+
+
+@bot.command(name="тествидео")
+async def test_video(ctx):
+	yt_channel = bot.get_channel(YOUTUBE_CHANNEL_ID)
+	if yt_channel:
+		fake_video = {
+			"title": "🎬 Тестовое видео: Камыш возвращается!",
+			"link": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+		}
+		await send_youtube_notification(yt_channel, fake_video)
+		await ctx.send("✅ Тестовое видео отправлено.")
+	else:
+		await ctx.send("❌ Канал YouTube не найден.")
+
+
+@bot.command(name="тестстрим")
+async def test_stream(ctx):
+	tw_channel = bot.get_channel(TWITCH_CHANNEL_ID)
+	if tw_channel:
+		await send_twitch_notification(tw_channel)
+		await ctx.send("📡 Тестовое уведомление о стриме отправлено.")
+	else:
+		await ctx.send("❌ Канал Twitch не найден.")
 
 
 @bot.event
