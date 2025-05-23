@@ -33,6 +33,7 @@ logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logg
 
 intents = disnake.Intents.default()
 intents.message_content = True
+intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 
@@ -43,9 +44,8 @@ last_youtube_video_id = None
 last_video_title = None
 last_youtube_video_sent_time = 0 
 twitch_stream_live = False
-
-
 send_lock = asyncio.Lock()
+http_session = None
 
 
 def load_state():
@@ -74,14 +74,10 @@ def save_state():
 		logging.error(f"Ошибка сохранения состояния: {e}")
 
 
-load_state()
-
-
-async def is_image_available(url):
+async def is_image_available(url: str) -> bool:
 	try:
-		async with aiohttp.ClientSession() as session:
-			async with session.head(url) as resp:
-				return resp.status == 200
+		async with http_session.head(url, timeout=5) as resp:
+			return resp.status == 200
 	except Exception as e:
 		logging.error(f"[Ошибка изображения] {e}")
 		return False
@@ -89,12 +85,17 @@ async def is_image_available(url):
 
 async def fetch_youtube_rss():
 	headers = {"User-Agent": "Mozilla/5.0"}
-	async with aiohttp.ClientSession(headers=headers) as entsession:
-		async with entsession.get(YOUTUBE_CHANNEL_RSS) as response:
+	try:
+		async with http_session.get(YOUTUBE_CHANNEL_RSS, headers=headers, timeout=10) as response:
 			if response.status == 200:
 				text = await response.text()
 				return feedparser.parse(text)
-	return None
+			else:
+				logging.warning(f"Ошибка при получении RSS: статус {response.status}")
+				return None
+	except Exception as e:
+		logging.error(f"Ошибка при загрузке RSS: {e}")
+		return None
 
 
 def extract_video_id(link: str) -> str | None:
@@ -105,38 +106,32 @@ def extract_video_id(link: str) -> str | None:
 async def get_latest_youtube_video(retry=3):
 	global last_youtube_video_id, last_video_title
 	for attempt in range(retry):
-		try:
-			feed = await fetch_youtube_rss()
-			if not feed or not feed.entries:
-				logging.warning(f"❌ Нет записей в YouTube RSS (попытка {attempt+1}/{retry})")
-				await asyncio.sleep(10)
-				continue
-			
-			entry = feed.entries[0]
-			video_id = extract_video_id(entry.link)
-			if not video_id:
-				logging.warning("❌ Не удалось извлечь video_id")
-				return None
-
-			title = entry.title
-			link = entry.link
-
-			if video_id != last_youtube_video_id:
-				last_youtube_video_id = video_id
-				last_video_title = title
-				save_state()
-				logging.info(f"Найдено новое видео: {title} ({video_id})")
-				return {"title": title, "link": link}
-			else:
-				logging.info("Новое видео не найдено, последнее видео уже отправлено.")
-				if not last_video_title:
-					last_video_title = title
-			return None
-		except Exception as e:
-			logging.error(f"[Ошибка YouTube] {e}")
-			last_youtube_video_id = None
-			last_video_title = None
+		feed = await fetch_youtube_rss()
+		if not feed or not feed.entries:
+			logging.warning(f"❌ Нет записей в YouTube RSS (попытка {attempt+1}/{retry})")
 			await asyncio.sleep(10)
+			continue
+			
+		entry = feed.entries[0]
+		video_id = extract_video_id(entry.link)
+		if not video_id:
+			logging.warning("❌ Не удалось извлечь video_id")
+			return None
+
+		title = entry.title
+		link = entry.link
+
+		if video_id != last_youtube_video_id:
+			last_youtube_video_id = video_id
+			last_video_title = title
+			save_state()
+			logging.info(f"Найдено новое видео: {title} ({video_id})")
+			return {"title": title, "link": link}
+		else:
+			logging.info("Новое видео не найдено, последнее видео уже отправлено.")
+			if not last_video_title:
+				last_video_title = title
+			return None
 	return None
 
 
@@ -175,20 +170,19 @@ async def send_youtube_notification(channel, video):
 			return
 		last_youtube_video_sent_time = now
 
-	video_id = extract_video_id(video["link"])
-	thumbnail = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
-	if not await is_image_available(thumbnail):
-		thumbnail = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
+		thumbnail = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+		if not await is_image_available(thumbnail):
+			thumbnail = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
 
-	embed = disnake.Embed(
-		title=f"✨ Новое видео: {video['title']}",
-		url=video["link"],
-		description="🔔 На канале вышел свежий ролик — зацени первым!",
-		color=disnake.Color.from_rgb(229, 57, 53)
-	)
-	embed.set_image(url=thumbnail)
-	await channel.send(content="@everyone", embed=embed, view=create_social_buttons())
-	logging.info(f"📢 Отправлено новое видео: {video['title']}")
+		embed = disnake.Embed(
+			title=f"✨ Новое видео: {video['title']}",
+			url=video["link"],
+			description="🔔 На канале вышел свежий ролик — зацени первым!",
+			color=disnake.Color.from_rgb(229, 57, 53)
+		)
+		embed.set_image(url=thumbnail)
+		await channel.send(content="@everyone", embed=embed, view=create_social_buttons())
+		logging.info(f"📢 Отправлено новое видео: {video['title']}")
 
 
 async def send_twitch_notification(channel):
@@ -214,7 +208,9 @@ async def check_updates():
 	yt_channel = bot.get_channel(YOUTUBE_CHANNEL_ID)
 	tw_channel = bot.get_channel(TWITCH_CHANNEL_ID)
 
-	if yt_channel:
+	if yt_channel is None:
+		logging.warning(f"Канал YouTube не найден (ID: {YOUTUBE_CHANNEL_ID})")
+	else:
 		new_video = await get_latest_youtube_video()
 		if new_video:
 			await send_youtube_notification(yt_channel, new_video)
@@ -222,7 +218,9 @@ async def check_updates():
 			logging.info("Видео не обновлялось с последней проверки.")
 
 	is_live = await is_twitch_stream_live()
-	if tw_channel:
+	if tw_channel is None:
+		logging.warning(f"Канал Twitch не найден (ID: {TWITCH_CHANNEL_ID})")
+	else:	
 		if is_live and not twitch_stream_live:
 			await send_twitch_notification(tw_channel)
 		elif not is_live:
@@ -264,6 +262,9 @@ async def manual_check(ctx):
 
 @bot.event
 async def on_ready():
+	global http_session
+	if http_session is None:
+		http_session = aiohttp.ClientSession()
 	logging.info(f"✅ Бот {bot.user} запущен!")
 	if not check_updates.is_running():
 		check_updates.start()
@@ -271,12 +272,15 @@ async def on_ready():
 
 
 async def update_presence(is_live: bool):
-	activity = None
-	if is_live:
-		activity = disnake.Activity(type=disnake.ActivityType.watching, name="xKamysh")
-	else:
-		activity = None
-	await bot.change_presence(activity=activity)
+	try:
+		if is_live:
+			activity = disnake.Activity(type=disnake.ActivityType.watching, name="xKamysh")
+		else:
+			activity = None
+		await bot.change_presence(activity=activity)
+		logging.info(f"Обновлена активность: {'Смотрит ' + TWITCH_USERNAME if is_live else 'нет активности'}")
+	except Exception as e:
+		logging.error(f"Ошибка обновления активности: {e}")
 
 
 async def handle(request):
@@ -293,8 +297,18 @@ async def run_webserver():
 	logging.info(f"🌐 HTTP сервер запущен на порту {PORT}")
 
 
+async def close_http_session():
+	await http_session.close()
+
+
 if __name__ == "__main__":
 	if not DISCORD_TOKEN:
 		logging.error("❌ Переменная окружения DISCORD_TOKEN не найдена.")
 		exit(1)
-	bot.run(DISCORD_TOKEN)
+
+	load_state()
+
+	try:
+		bot.run(DISCORD_TOKEN)
+	finally:
+		asyncio.run(close_http_session())
