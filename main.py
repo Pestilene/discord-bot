@@ -170,7 +170,7 @@ async def send_youtube_notification(channel, video):
 		import time
 		now = time.time()
 		video_id = extract_video_id(video["link"])
-		if video_id["link"].endswitch(last_youtube_video_id) and (now - last_youtube_video_sent_time < 300):
+		if video_id == last_youtube_video_id and (now - last_youtube_video_sent_time < 300):
 			logging.info("Повторное видео не отправляется из-за ограничения по времени.")
 			return
 		last_youtube_video_sent_time = now
