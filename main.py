@@ -244,11 +244,6 @@ async def on_ready():
 
 async def update_presence(is_live):
 	if is_live:
-		activity = disnake.activity(
-			type=disnake.ActivityType.watching,
-			name="xKamysh"
-		)
-	else:
 		activity = disnake.Activity(
 			type=disnake.ActivityType.watching,
 			name="xKamysh"
@@ -257,7 +252,7 @@ async def update_presence(is_live):
 
 
 async def handle(request):
-	return web.response(text="OK")
+	return web.response(text="ОК")
 
 
 async def run_webserver():
