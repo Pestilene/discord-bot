@@ -82,6 +82,7 @@ async def is_image_available(url):
 		logging.error(f"[Ошибка изображения] {e}")
 		return False
 
+
 async def fetch_youtube_rss():
 	headers = {"User-Agent": "Mozilla/5.0"}
 	async with aiohttp.ClientSession(headers=headers) as entsession:
@@ -90,6 +91,7 @@ async def fetch_youtube_rss():
 				text = await response.text()
 				return feedparser.parse(text)
 	return None
+
 
 def extract_video_id(link: str) -> str | None:
 	parsed = urlparse(link)
@@ -119,8 +121,10 @@ async def get_latest_youtube_video(retry=3):
 				last_youtube_video_id = video_id
 				last_video_title = title
 				save_state()
+				logging.info(f"Найдено новое видео: {title} ({video_id})")
 				return {"title": title, "link": link}
 			else:
+				logging.info("Новое видео не найдено, последнее видео уже отправлено.")
 				if not last_video_title:
 					last_video_title = title
 			return None
@@ -198,12 +202,15 @@ async def check_updates():
 		new_video = await get_latest_youtube_video()
 		if new_video:
 			await send_youtube_notification(yt_channel, new_video)
+		else:
+			logging.info("Видео не обновлялось с последней проверки.")
 
 	is_live = await is_twitch_stream_live()
 	if tw_channel:
 		if is_live and not twitch_stream_live:
 			await send_twitch_notification(tw_channel)
-		elif not is_live
+		elif not is_live:
+			logging.info("Стрим закончился.")
 			twitch_stream_live = False
 
 	await update_presence(is_live)
@@ -251,6 +258,8 @@ async def update_presence(is_live: bool):
 	activity = None
 	if is_live:
 		activity = disnake.Activity(type=disnake.ActivityType.watching, name="xKamysh")
+	else:
+		activity = None
 	await bot.change_presence(activity=activity)
 
 
