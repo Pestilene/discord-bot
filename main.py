@@ -135,7 +135,7 @@ async def get_latest_youtube_video(retry=3):
 			now = time.time()
 			if now - last_youtube_video_sent_time > 300:
 				logging.info("Новое видео не найдено, последнее видео уже отправлено.")
-				return None
+			return None
 	return None
 
 
