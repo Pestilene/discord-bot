@@ -199,7 +199,7 @@ async def send_twitch_notification(channel):
 		description="🎉 Заходи на эфир! Общение, атмосфера и веселье ждут тебя!",
 		color=disnake.Color.from_rgb(138, 43, 226)
 	)
-	embed.set_image(url="https://media.tenor.com/cXxyLBfDOUgAAAAi/streaming-twitch.gif")
+	embed.set_image(url="https://media.discordapp.net/attachments/722745907279298590/1375504368907849903/134799723_thumbnail.webp?ex=6833e805&is=68329685&hm=f849c46856c2a7919f54da8455a6c1c8403a29a4d523fad56cfbd048439bf450&=&format=webp&width=1522&height=856")
 	embed.set_footer(text="Twitch • Камыш", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
 	await channel.send(content="@everyone", embed=embed, view=create_social_buttons())
 	logging.info(f"📢 Стрим в эфире: {TWITCH_USERNAME}")	
