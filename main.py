@@ -18,7 +18,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
-from datetime import datetime
+import datetime as dt
 import pytz
 
 # Set the desired time zone (UTC+3, e.g., Moscow Time)
@@ -27,10 +27,10 @@ TIMEZONE = pytz.timezone('Europe/Moscow')
 # Custom formatter to use the specified time zone
 class TimezoneFormatter(logging.Formatter):
     def formatTime(self, record, datefmt=None):
-        dt = datetime.fromtimestamp(record.created, tz=TIMEZONE)
+        dt_obj = dt.datetime.fromtimestamp(record.created, tz=TIMEZONE)
         if datefmt:
-            return dt.strftime(datefmt)
-        return dt.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
+            return dt_obj.strftime(datefmt)
+        return dt_obj.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
 
 # Configure logging with the custom formatter
 logging.basicConfig(
@@ -39,7 +39,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Apply the custom formatter to the logger's handlers
 for handler in logger.handlers:
     handler.setFormatter(TimezoneFormatter('%(asctime)s [%(levelname)s] %(message)s'))
 
@@ -217,12 +216,17 @@ async def send_youtube_notification(channel, video):
         thumbnail = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
         if not await is_image_available(thumbnail):
             thumbnail = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
+            if not await is_image_available(thumbnail):
+                logger.warning(f"Не удалось загрузить превью для видео {video_id}. Используется embed без изображения.")
+                thumbnail = None
         embed = disnake.Embed(
             title=f"✨ Новое видео: {video['title']}",
             url=video["link"],
             color=disnake.Color.from_rgb(229, 57, 53),
-            timestamp=datetime.utcnow()
-        ).set_image(url=thumbnail)
+            timestamp=dt.datetime.now(dt.UTC)
+        )
+        if thumbnail:
+            embed.set_image(url=thumbnail)
         await channel.send(content="@everyone", embed=embed, view=create_social_buttons(video["link"]))
         logger.info(f"📢 Отправлено новое видео: {video['title']}")
 
@@ -233,7 +237,7 @@ async def send_twitch_notification(channel):
         url=f"https://twitch.tv/{TWITCH_USERNAME}",
         description="🎉 Заходи на эфир! Общение, атмосфера и веселье ждут тебя!",
         color=disnake.Color.from_rgb(138, 43, 226),
-        timestamp=datetime.utcnow()
+        timestamp=dt.datetime.now(dt.UTC)
     ).set_image(url="https://media.discordapp.net/attachments/722745907279298590/1378720172734545970/134799723_thumbnail.webp?ex=683e4978&is=683cf7f8&hm=199afc43df2a8def8a11ce6bbbe3d7fe79cf3351fa916f1f930428d90a2ca6e2&=&format=webp&width=1522&height=856")
     embed.set_footer(text=f"Twitch • {TWITCH_USERNAME}", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
     await channel.send(content="@everyone", embed=embed, view=create_social_buttons(f"https://twitch.tv/{TWITCH_USERNAME}"))
@@ -250,6 +254,11 @@ def start_telegram_bot():
     async def telegram_main():
         telegram_bot = Bot(token=TELEGRAM_TOKEN)
         dp = Dispatcher(storage=MemoryStorage())
+
+        @dp.errors()
+        async def on_error(update, error):
+            logger.error(f"Error processing update {update.update_id if update else 'N/A'}: {error}", exc_info=True)
+            return True
 
         start_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="📝 Создать сообщение", callback_data="create_message")],
@@ -480,27 +489,36 @@ def start_telegram_bot():
 @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
 async def check_updates():
     global twitch_stream_live
-    yt_channel = bot.get_channel(YOUTUBE_CHANNEL_ID)
-    tw_channel = bot.get_channel(TWITCH_CHANNEL_ID)
-    if yt_channel is None:
-        logger.warning(f"Канал YouTube не найден (ID: {YOUTUBE_CHANNEL_ID})")
-    else:
-        new_video = await get_latest_youtube_video()
-        if new_video:
-            await send_youtube_notification(yt_channel, new_video)
-        else:
-            logger.info("Видео не обновлялось с последней проверки.")
-    if tw_channel is None:
-        logger.warning(f"Канал Twitch не найден (ID: {TWITCH_CHANNEL_ID})")
-    else:
-        is_live = await is_twitch_stream_live()
-        if is_live and not twitch_stream_live:
-            await send_twitch_notification(tw_channel)
-        elif not is_live:
-            logger.info("Twitch стрим закончен.")
-            twitch_stream_live = False
-        await update_presence(is_live)
-
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            yt_channel = bot.get_channel(YOUTUBE_CHANNEL_ID)
+            tw_channel = bot.get_channel(TWITCH_CHANNEL_ID)
+            if yt_channel is None:
+                logger.warning(f"Канал YouTube не найден (ID: {YOUTUBE_CHANNEL_ID})")
+            else:
+                new_video = await get_latest_youtube_video()
+                if new_video:
+                    await send_youtube_notification(yt_channel, new_video)
+                else:
+                    logger.info("Видео не обновлялось с последней проверки.")
+            if tw_channel is None:
+                logger.warning(f"Канал Twitch не найден (ID: {TWITCH_CHANNEL_ID})")
+            else:
+                is_live = await is_twitch_stream_live()
+                if is_live and not twitch_stream_live:
+                    await send_twitch_notification(tw_channel)
+                elif not is_live:
+                    logger.info("Twitch стрим закончен.")
+                    twitch_stream_live = False
+                await update_presence(is_live)
+            break
+        except Exception as e:
+            logger.error(f"Error in check_updates (attempt {attempt + 1}/{max_retries}): {e}", exc_info=True)
+            if attempt < max_retries - 1:
+                await asyncio.sleep(5)
+            else:
+                logger.error("Max retries reached in check_updates. Task failed.")
 
 @bot.command(name="help")
 async def custom_help(ctx):
@@ -595,7 +613,7 @@ async def telegram_news_handler(request):
         embed = disnake.Embed(
             title=message,
             color=disnake.Color.from_rgb(229, 57, 53),
-            timestamp=datetime.utcnow()
+            timestamp=dt.datetime.now(dt.UTC)
         )
         files = []
         if data.get("video_url"):
@@ -604,8 +622,12 @@ async def telegram_news_handler(request):
                 thumbnail = data.get("preview_url") or f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
                 if not await is_image_available(thumbnail):
                     thumbnail = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
-                embed.url = data["video_url"]
-                embed.set_image(url=thumbnail)
+                    if not await is_image_available(thumbnail):
+                        logger.warning(f"Не удалось загрузить превью для видео {video_id}.")
+                        thumbnail = None
+                if thumbnail:
+                    embed.url = data["video_url"]
+                    embed.set_image(url=thumbnail)
         if data.get("preview_path"):
             files.append(disnake.File(data["preview_path"]))
         view = create_social_buttons(data.get("video_url", ""))
