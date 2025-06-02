@@ -21,7 +21,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import datetime as dt
 import pytz
 
+
 TIMEZONE = pytz.timezone('Europe/Moscow')
+
 
 class TimezoneFormatter(logging.Formatter):
     def formatTime(self, record, datefmt=None):
@@ -30,14 +32,17 @@ class TimezoneFormatter(logging.Formatter):
             return dt_obj.strftime(datefmt)
         return dt_obj.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
 
+
 logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
+
 for handler in logger.handlers:
     handler.setFormatter(TimezoneFormatter('%(asctime)s [%(levelname)s] %(message)s'))
+
 
 STATE_FILE = "youtube_state.json"
 TEMP_IMAGE_DIR = "temp_images"
@@ -58,6 +63,7 @@ WEB_SERVER_RESPONSE = "Message sent"
 WEB_SERVER_ERROR = "Ошибка сервера"
 DISCORD_CHANNEL_ERROR = "Discord канал не найден"
 
+
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -69,6 +75,7 @@ YOUTUBE_CHANNEL_RSS = os.getenv("YOUTUBE_CHANNEL_RSS", "https://www.youtube.com/
 TWITCH_USERNAME = os.getenv("TWITCH_USERNAME", "xKamysh")
 CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "5"))
 
+
 http_session = None
 last_youtube_video_id = None
 last_video_title = None
@@ -78,13 +85,16 @@ twitch_stream_check = False
 send_lock = asyncio.Lock()
 temp_storage = {}
 
+
 if not os.path.exists(TEMP_IMAGE_DIR):
     os.makedirs(TEMP_IMAGE_DIR)
+
 
 intents = disnake.Intents.default()
 intents.message_content = True
 intents.guilds = True
 bot = commands.Bot(command_prefix="/", intents=intents, help_command=None)
+
 
 def load_state():
     global last_youtube_video_id, last_video_title, last_youtube_video_sent_time
@@ -98,6 +108,7 @@ def load_state():
     except (FileNotFoundError, json.JSONDecodeError):
         logger.info("Файл состояния не найден или повреждён, состояние сброшено.")
 
+
 def save_state():
     try:
         with open(STATE_FILE, "w") as f:
@@ -110,6 +121,7 @@ def save_state():
     except Exception as e:
         logger.error(f"Ошибка сохранения состояния: {e}")
 
+
 async def is_image_available(url: str) -> bool:
     try:
         async with http_session.head(url, timeout=5) as resp:
@@ -117,6 +129,7 @@ async def is_image_available(url: str) -> bool:
     except Exception as e:
         logger.error(f"[Ошибка изображения] {e}")
         return False
+
 
 async def fetch_youtube_rss():
     try:
@@ -128,11 +141,13 @@ async def fetch_youtube_rss():
         logger.error(f"Ошибка при загрузке RSS: {e}")
     return None
 
+
 def extract_video_id(link: str) -> str | None:
     parsed = urlparse(link)
     if parsed.hostname in ("youtu.be",):
         return parsed.path.lstrip("/")
     return parse_qs(parsed.query).get("v", [None])[0]
+
 
 async def get_video_preview_url(video_url: str) -> str | None:
     parsed = urlparse(video_url)
@@ -147,6 +162,7 @@ async def get_video_preview_url(video_url: str) -> str | None:
                 return thumbnail_url
     logger.warning(f"Не удалось получить превью для URL: {video_url}")
     return None
+
 
 async def get_latest_youtube_video(retry=3):
     global last_youtube_video_id, last_video_title, last_youtube_video_sent_time
@@ -176,6 +192,7 @@ async def get_latest_youtube_video(retry=3):
             return None
     return None
 
+
 async def is_twitch_stream_live() -> bool:
     try:
         loop = asyncio.get_running_loop()
@@ -185,6 +202,7 @@ async def is_twitch_stream_live() -> bool:
     except Exception as e:
         logger.warning(f"[Ошибка проверки Twitch] {e}")
         return False
+
 
 def create_social_buttons(video_url="") -> View:
     view = View()
@@ -199,6 +217,7 @@ def create_social_buttons(video_url="") -> View:
     for label, url in links.items():
         view.add_item(Button(label=label, url=url, style=disnake.ButtonStyle.link))
     return view
+
 
 async def send_youtube_notification(channel, video):
     global last_youtube_video_sent_time
@@ -227,6 +246,7 @@ async def send_youtube_notification(channel, video):
         await channel.send(content="@everyone", embed=embed, view=create_social_buttons(video["link"]))
         logger.info(f"📢 Отправлено новое видео: {video['title']}")
 
+
 async def send_twitch_notification(channel):
     global twitch_stream_live
     embed = disnake.Embed(
@@ -241,12 +261,14 @@ async def send_twitch_notification(channel):
     logger.info(f"📢 Стрим в эфире: {TWITCH_USERNAME}")
     twitch_stream_live = True
 
+
 def start_telegram_bot():
     class Form(StatesGroup):
         waiting_for_title = State()
         waiting_for_preview = State()
         waiting_for_video_url = State()
         confirming = State()
+
 
     async def telegram_main():
         telegram_bot = Bot(token=TELEGRAM_TOKEN)
@@ -266,6 +288,7 @@ def start_telegram_bot():
             [InlineKeyboardButton(text="⏩ Пропустить", callback_data="skip")],
             [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
         ])
+
 
         async def send_preview(message: Message, form_data: dict, confirm_keyboard: InlineKeyboardMarkup):
             preview_text = (
@@ -295,6 +318,7 @@ def start_telegram_bot():
                     reply_markup=confirm_keyboard
                 )
 
+
         @dp.message(F.text == "/start")
         async def start_command(message: Message):
             if message.from_user.id != TELEGRAM_ADMIN_ID:
@@ -302,10 +326,12 @@ def start_telegram_bot():
                 return
             await message.answer(START_MESSAGE, reply_markup=start_keyboard)
 
+
         @dp.message(F.text == "/cancel")
         async def cancel_command(message: Message, state: FSMContext):
             await state.clear()
             await message.answer(CANCEL_MESSAGE, reply_markup=start_keyboard)
+
 
         @dp.callback_query(F.data == "create_message")
         async def forward_to_discord(callback: CallbackQuery, state: FSMContext):
@@ -329,6 +355,7 @@ def start_telegram_bot():
             logger.info(f"State after transition: {new_state}")
             await callback.answer()
 
+
         @dp.message(Form.waiting_for_title)
         async def process_title(message: Message, state: FSMContext):
             logger.info(f"Received message in waiting_for_title state: {message.text} from user {message.from_user.id}")
@@ -338,6 +365,7 @@ def start_telegram_bot():
             await state.update_data(title=message.text[:256] if message.text else "")
             await message.answer(PREVIEW_PROMPT, reply_markup=cancel_keyboard)
             await state.set_state(Form.waiting_for_preview)
+
 
         @dp.callback_query(F.data == "skip")
         async def skip_step(callback: CallbackQuery, state: FSMContext):
@@ -370,6 +398,7 @@ def start_telegram_bot():
                 await state.set_state(Form.confirming)
             await callback.answer()
 
+
         @dp.message(Form.waiting_for_preview)
         async def process_preview(message: Message, state: FSMContext):
             if message.from_user.id != TELEGRAM_ADMIN_ID:
@@ -391,6 +420,7 @@ def start_telegram_bot():
             await state.update_data(preview_url=preview_url, preview_path=preview_path)
             await message.answer(VIDEO_URL_PROMPT, reply_markup=cancel_keyboard)
             await state.set_state(Form.waiting_for_video_url)
+
 
         @dp.message(Form.waiting_for_video_url)
         async def process_video_url(message: Message, state: FSMContext):
@@ -420,6 +450,7 @@ def start_telegram_bot():
             ])
             await send_preview(message, form_data, confirm_keyboard)
             await state.set_state(Form.confirming)
+
 
         @dp.callback_query(Form.confirming, F.data.startswith("confirm_"))
         async def confirm_send(callback: CallbackQuery, state: FSMContext):
@@ -466,6 +497,7 @@ def start_telegram_bot():
                 logger.error(f"Ошибка отправки из Telegram в Discord: {e}")
                 await callback.answer("❌ Ошибка.")
 
+
         @dp.callback_query(F.data == "cancel")
         async def cancel_callback(callback: CallbackQuery, state: FSMContext):
             await state.clear()
@@ -482,6 +514,7 @@ def start_telegram_bot():
         await dp.start_polling(telegram_bot)
 
     asyncio.run(telegram_main())
+
 
 @tasks.loop(minutes=CHECK_INTERVAL_MINUTES)
 async def check_updates():
@@ -517,6 +550,7 @@ async def check_updates():
             else:
                 logger.error("Max retries reached in check_updates. Task failed.")
 
+
 @bot.command(name="help")
 async def custom_help(ctx):
     help_text = (
@@ -527,6 +561,7 @@ async def custom_help(ctx):
         "/teststream (или /тестстрим) - Отправить тестовое уведомление о стриме\n"
     )
     await ctx.send(help_text)
+
 
 @bot.command(name="проверка")
 async def manual_check(ctx):
@@ -552,6 +587,7 @@ async def manual_check(ctx):
     else:
         await ctx.send("📴 Стрим сейчас не идёт.")
 
+
 @bot.command(name="testvideo", aliases=["тествидео"])
 async def test_video(ctx):
     yt_channel = bot.get_channel(YOUTUBE_CHANNEL_ID)
@@ -565,6 +601,7 @@ async def test_video(ctx):
     else:
         await ctx.send("❌ Канал YouTube не найден.")
 
+
 @bot.command(name="teststream", aliases=["тестстрим"])
 async def test_stream(ctx):
     twitch_channel = bot.get_channel(TWITCH_CHANNEL_ID)
@@ -573,6 +610,7 @@ async def test_stream(ctx):
         await ctx.send("📡 Тестовое уведомление о стриме отправлено.")
     else:
         await ctx.send("❌ Канал Twitch не найден.")
+
 
 @bot.event
 async def on_ready():
@@ -583,6 +621,7 @@ async def on_ready():
     if not check_updates.is_running():
         check_updates.start()
     bot.loop.create_task(run_webserver())
+
 
 async def update_presence(is_live: bool):
     try:
@@ -595,8 +634,10 @@ async def update_presence(is_live: bool):
     except Exception as e:
         logger.error(f"Ошибка обновления активности: {e}")
 
+
 async def handle(request):
     return web.Response(text="ОК")
+
 
 async def telegram_news_handler(request):
     try:
@@ -635,6 +676,7 @@ async def telegram_news_handler(request):
         logger.error(f"Ошибка при обработке запроса: {e}")
         return web.Response(status=500, text=WEB_SERVER_ERROR)
 
+
 async def run_webserver():
     app = web.Application()
     app.add_routes([
@@ -647,10 +689,12 @@ async def run_webserver():
     await site.start()
     logger.info(f"🌐 HTTP сервер запущен на порту {PORT}")
 
+
 async def close_http_session():
     global http_session
     if http_session:
         await http_session.close()
+
 
 if __name__ == "__main__":
     if not all([DISCORD_TOKEN, TELEGRAM_TOKEN]):
