@@ -21,10 +21,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import datetime as dt
 import pytz
 
-# Set the desired time zone (UTC+3, e.g., Moscow Time)
 TIMEZONE = pytz.timezone('Europe/Moscow')
 
-# Custom formatter to use the specified time zone
 class TimezoneFormatter(logging.Formatter):
     def formatTime(self, record, datefmt=None):
         dt_obj = dt.datetime.fromtimestamp(record.created, tz=TIMEZONE)
@@ -32,7 +30,6 @@ class TimezoneFormatter(logging.Formatter):
             return dt_obj.strftime(datefmt)
         return dt_obj.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
 
-# Configure logging with the custom formatter
 logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(message)s',
     level=logging.INFO
