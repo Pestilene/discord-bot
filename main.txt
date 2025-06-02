@@ -1,0 +1,304 @@
+import os
+import json 
+import asyncio
+import logging
+from urllib.parse import urlparse, parse_qs
+from concurrent.futures import ThreadPoolExecutor
+
+import disnake
+from disnake.ext import commands, tasks
+from disnake.ui import Button, View
+import aiohttp
+import feedparser
+import streamlink
+from aiohttp import web
+from aiogram import Bot as TgBot, Dispatcher, types, F
+from aiogram.enums import ParseMode
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.filters import Command
+from aiogram import Router
+from dotenv import load_dotenv
+from aiogram.client.bot import DefaultBotProperties
+
+from typing import Optional
+
+load_dotenv()
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+PORT = int(os.getenv("PORT", 8000))
+
+th_bot = TgBot(
+	token=TELEGRAM_TOKEN, 
+	default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
+dp = Dispatcher()
+th_router = Router()
+dp.include_router(th_router)
+
+
+intents = disnake.Intents.default()
+intents.message_content = True
+intents.guilds = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+
+YOUTUBE_CHANNEL_ID = 1374412160939196476
+TWITCH_CHANNEL_ID = 1374434150395940965
+
+YOUTUBE_CHANNEL_RSS = "https://www.youtube.com/feeds/videos.xml?channel_id=UCGCE6j2NovYuhXIMlCPhHnQ"
+TWITCH_USERNAME = "xKamysh"
+
+
+STATE_FILE = "youtube_state.json"
+user_state = {}
+
+
+last_youtube_video_id = None
+last_video_title = None
+last_youtube_video_sent_time = 0 
+twitch_stream_live = False
+send_lock = asyncio.Lock()
+http_session: aiohttp.ClientSession = None
+
+
+logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+
+
+@th_router.message_handler(commands=["start"])
+async def start_command(message: types.Message):
+	await message.answer("Введите название видео:")
+	user_state[message.from_user.id] = {"step": "title"}
+
+
+@th_router.message()
+async def handle_input(message: types.Message):
+	user_id = message.from_user.id
+	state = user_state.get(user_id, {})
+
+	if state.get("step") == "title":
+		state["title"] = message.text
+		state["step"] = "preview_choice"
+		user_state[user_id] = state
+
+		buttons = [
+			[InlineKeyboardButton("Выбрать превью", callback_data="choose_preview")],
+			[InlineKeyboardButton("Пропустить", callback_data="skip_preview")]
+		]
+		markup = InlineKeyboardMarkup(inline_keyboard=buttons)
+		await message.answer("Выберите превью или пропустите:", reply_markup=markup)
+
+	elif state.get("step") == "video_link":
+		state["link"] = message.text
+		await send_to_discord(state)
+		await message.answer("✅ Сообщение отправлено в Discord!")
+		user_state.pop(user_id, None)
+
+@th_router.callback_query_handler(lambda c: c.data in ["choose_preview", "skip_preview"])
+async def handle_preview_choice(callback_query: types.CallbackQuery):
+	user_id = callback_query.from_user.id
+	data = callback_query.data
+	state = user_state.get(user_id, {})
+
+	if data == "choose_preview":
+		state["preview"] = "https://example.com/your-custom-thumbnail.jpg"
+	else:
+		state["preview"] = None 
+
+	state["step"] = "video_link"
+	await callback_query.message.answer("Теперь введите ссылку на видео:")
+	user_state[user_id] = state
+	await callback_query.answer()
+
+
+async def send_to_discord(data):
+	channel = bot.get_channel(YOUTUBE_CHANNEL_ID)
+	if not channel:
+		logging.warning("❌ Discord-канал не найден.")
+		return
+
+	embed = disnake.Embed(
+		title=f"✨ Видео: {data['title']}",
+		url=data['link'],
+		description="Отправлено из Telegram",
+		color=disnake.Color.green()
+	)
+	if data.get("preview"):
+		embed.set_image(url=data["preview"])
+
+	await channel.send(embed=embed)
+
+
+
+def load_state():
+	global last_youtube_video_id, last_video_title, last_youtube_video_sent_time
+	try:
+		with open(STATE_FILE, "r") as f:
+			state = json.load(f)
+			last_youtube_video_id = state.get("last_video_id")
+			last_video_title = state.get("last_video_title")
+			last_youtube_video_sent_time = state.get("last_sent_time", 0)
+	except (FileNotFoundError, json.JSONDecodeError):
+		last_youtube_video_id = None
+		last_video_title = None
+		last_youtube_video_sent_time = 0
+
+
+def save_state():
+		with open(STATE_FILE, "w") as f:
+			json.dump({
+				"last_video_id": last_youtube_video_id, 
+				"last_video_title": last_video_title,
+				"last_sent_time": last_youtube_video_sent_time
+			}, f)
+
+
+async def fetch_youtube_rss():
+	headers = {"User-Agent": "Mozilla/5.0"}
+	try:
+		async with http_session.get(YOUTUBE_CHANNEL_RSS, headers=headers, timeout=10) as response:
+			if response.status == 200:
+				text = await response.text()
+				return feedparser.parse(text)
+			return None
+	except Exception as e:
+		logging.error(f"Ошибка при загрузке RSS: {e}")
+		return None
+
+
+def extract_video_id(link: str) -> Optional[str]:
+	parsed = urlparse(link)
+	return parse_qs(parsed.query).get("v", [None])[0]
+
+
+async def get_latest_youtube_video(retry=3):
+	global last_youtube_video_id, last_video_title
+	for _ in range(retry):
+		feed = await fetch_youtube_rss()
+		if not feed or not feed.entries:
+			await asyncio.sleep(10)
+			continue
+			
+		entry = feed.entries[0]
+		video_id = extract_video_id(entry.link)
+		if not video_id:
+			return None
+
+		title = entry.title
+		link = entry.link
+
+		if video_id != last_youtube_video_id:
+			last_youtube_video_id = video_id
+			last_video_title = title
+			save_state()
+			return {"title": title, "link": link}
+	return None
+
+
+async def is_image_available(url: str) -> bool:
+	try:
+		async with http_session.head(url, timeout=5) as resp:
+			return resp.status == 200
+	except:
+		return False
+
+
+async def is_twitch_stream_live() -> bool:
+	try:
+		loop = asyncio.get_running_loop()
+		with ThreadPoolExecutor() as pool:
+			streams = await loop.run_in_executor(pool, streamlink.streams, f"https://twitch.tv/{TWITCH_USERNAME}")
+		return bool(streams)
+	except Exception as e:
+		logging.warning(f"[Ошибка Twitch] {e}")
+		return False
+
+
+def create_social_buttons() -> View:
+	view = View()
+	links = {
+		"💬 Telegram": "https://t.me/kamyshovnik",
+		"📘 VK": "https://vk.com/kamyshovnik",
+		"🎵 TikTok": "https://www.tiktok.com/@xkamysh",
+		"💖 Boosty": "https://boosty.to/xkamysh",
+	}
+	for label, url in links.items():
+		view.add_item(Button(label=label, url=url, style=disnake.ButtonStyle.link))
+	return view
+
+
+async def youtube_loop():
+	global last_youtube_video_sent_time
+	while True:
+		try:
+			video = await get_latest_youtube_video()
+			now = time.time()
+
+			if video and now - last_youtube_video_sent_time > 60:
+				preview = f"https://i.ytimg.com/vi/{extract_video_id(video['link'])}/hqdefault.jpg"
+				if await is_image_available(preview):
+					video["preview"] = preview
+
+				await send_to_discord(video)
+				last_youtube_video_sent_time = now
+				save_state()
+		except Exception as e:
+			logging.error(f"[YT Loop Error] {e}")
+		await asyncio.sleep(30)
+
+
+async def twitch_loop():
+	notified = False
+	while True:
+		try:
+			live = await is_twitch_stream_live()
+			if live and not notified:
+				embed = disnake.Embed(
+					title="🟣 Twitch стрим!",
+					url=f"https://twitch.tv/{TWITCH_USERNAME}",
+					description=f"{TWITCH_USERNAME} в эфире!",
+					color=disnake.Color.purple()
+				)
+				embed.set_thumbnail(url="https://static-cdn.jtvnw.net/jtv_user_pictures/kamysh-profile_image.png")
+				await send_to_discord({"title": "Стрим!", "link": f"https://twitch.tv/{TWITCH_USERNAME}", "preview": None})
+				notified = True
+			elif not live:
+				notified = False
+		except Exception as e:
+			logging.error(f"[Twitch Loop Error] {e}")
+		await asyncio.sleep(60)
+
+
+@bot.slash_command(name="links", description="Социальные сети")
+async def links(ctx):
+	await ctx.send("Наши соцсети:", view=create_social_buttons())
+
+async def start_telegram():
+	await dp.start_polling(bot=th_bot)
+
+async def run_webserver():
+	app = web.Application()
+	app.add_routes([web.get("/", lambda _: web.Response(text="OK"))])
+	runner = web.AppRunner(app)
+	await runner.setup()
+	site = web.TCPSite(runner, "0.0.0.0", PORT)
+	await site.start()
+
+@bot.event
+async def on_ready():
+	logging.info(f"✅ {bot.user} готов к работе.")
+	load_state()
+	http_session = aiohttp.ClientSession()
+	bot.loop.create_task(youtube_loop())
+	bot.loop.create_task(twitch_loop())
+	bot.loop.create_task(run_webserver())
+	bot.loop.create_task(start_telegram())
+
+
+@bot.event
+async def on_close():
+	if http_session:
+		await http_session.close()
+
+
+bot.run(DISCORD_TOKEN)
