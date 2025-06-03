@@ -172,24 +172,27 @@ async def get_latest_youtube_video(retry=3):
             logger.warning(f"❌ Нет записей в YouTube RSS (попытка {attempt+1}/{retry})")
             await asyncio.sleep(10)
             continue
-        entry = feed.entries[0]
-        if "shorts" in entry.link.lower():
-            logger.info("⏩ Пропущено Shorts-видео.")
-            return None
-        video_id = extract_video_id(entry.link)
-        if not video_id:
-            logger.warning("❌ Не удалось извлечь video_id")
-            return None
-        if video_id != last_youtube_video_id:
-            last_youtube_video_id = video_id
-            last_video_title = entry.title
-            last_youtube_video_sent_time = asyncio.get_event_loop().time()
-            save_state()
-            logger.info(f"Найдено новое видео: {entry.title} ({video_id})")
-            return {"title": entry.title, "link": entry.link}
-        elif asyncio.get_event_loop().time() - last_youtube_video_sent_time > 300:
-            logger.info("Новое видео не найдено, последнее видео уже отправлено.")
-            return None
+        for entry in feed.entries:
+            video_url = entry.link.lower()
+            if "shorts" in video_url or "/shorts/" in video_url:
+                logger.info(f"⏩ Пропущено YouTube Shorts: {entry.title} ({entry.link})")
+                continue
+            video_id = extract_video_id(entry.link)
+            if not video_id:
+                logger.warning(f"❌ Не удалось извлечь video_id для {entry.link}")
+                continue
+            if video_id != last_youtube_video_id:
+                last_youtube_video_id = video_id
+                last_video_title = entry.title
+                last_youtube_video_sent_time = asyncio.get_event_loop().time()
+                save_state()
+                logger.info(f"Найдено новое полное видео: {entry.title} ({video_id})")
+                return {"title": entry.title, "link": entry.link}
+            elif asyncio.get_event_loop().time() - last_youtube_video_sent_time > 300:
+                logger.info("Новое полное видео не найдено, последнее видео уже отправлено.")
+                return None
+        logger.info("Все видео в RSS являются Shorts или уже отправлены.")
+        return None
     return None
 
 
