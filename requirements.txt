@@ -1,6 +1,6 @@
 disnake
-feedparser
 aiohttp
+feedparser
 streamlink
 python-dotenv
-PyNaCl
+aiogram=
