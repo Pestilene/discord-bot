@@ -124,7 +124,7 @@ def save_state():
 
 async def is_image_available(url: str) -> bool:
     try:
-        async with http_session.head(url, timeout=5) as resp:
+        async with http_session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
             return resp.status == 200
     except Exception as e:
         logger.error(f"[Ошибка изображения] {e}")
@@ -143,10 +143,26 @@ async def fetch_youtube_rss():
 
 
 def extract_video_id(link: str) -> str | None:
-    parsed = urlparse(link)
-    if parsed.hostname in ("youtu.be",):
-        return parsed.path.lstrip("/")
-    return parse_qs(parsed.query).get("v", [None])[0]
+    try:
+        parsed = urlparse(link)
+        if "shorts" in parsed.path.lower() or "shorts" in link.lower():
+            return None
+        if parsed.hostname in ("youtu.be",):
+            video_id = parsed.path.lstrip("/")
+            if video_id:
+                return video_id
+        elif parsed.hostname in ("www.youtube.com", "youtube.com"):
+            video_id = parse_qs(parsed.query).get("v", [None])[0]
+            if video_id:
+                return video_id
+            logger.warning(f"Невалидный YouTube URL (нет video_id): {link}")
+            return None
+        logger.warning(f"Невалидный YouTube URL (неподдерживаемый домен): {link}")
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка при извлечении video_id из {link}: {e}")
+        return None
+
 
 
 async def get_video_preview_url(video_url: str) -> str | None:
@@ -172,14 +188,14 @@ async def get_latest_youtube_video(retry=3):
             logger.warning(f"❌ Нет записей в YouTube RSS (попытка {attempt+1}/{retry})")
             await asyncio.sleep(10)
             continue
+        invalid_urls = []
         for entry in feed.entries:
             video_url = entry.link.lower()
             if "shorts" in video_url or "/shorts/" in video_url:
-                logger.info(f"⏩ Пропущено YouTube Shorts: {entry.title} ({entry.link})")
                 continue
             video_id = extract_video_id(entry.link)
             if not video_id:
-                logger.warning(f"❌ Не удалось извлечь video_id для {entry.link}")
+                invalid_urls.append(entry.link)
                 continue
             if video_id != last_youtube_video_id:
                 last_youtube_video_id = video_id
@@ -191,6 +207,8 @@ async def get_latest_youtube_video(retry=3):
             elif asyncio.get_event_loop().time() - last_youtube_video_sent_time > 300:
                 logger.info("Новое полное видео не найдено, последнее видео уже отправлено.")
                 return None
+        if invalid_urls:
+            logger.warning(f"Пропущены невалидные URL ({len(invalid_urls)}): {', '.join(invalid_urls[:3])}{'...' if len(invalid_urls) > 3 else ''}")
         logger.info("Все видео в RSS являются Shorts или уже отправлены.")
         return None
     return None
@@ -650,33 +668,57 @@ async def telegram_news_handler(request):
         if not channel:
             logger.error(f"Канал Discord не найден (ID: {YOUTUBE_CHANNEL_ID})")
             return web.Response(status=404, text=DISCORD_CHANNEL_ERROR)
+        
         message = data.get("message") or DEFAULT_MESSAGE
         embed = disnake.Embed(
             title=message,
             color=disnake.Color.from_rgb(229, 57, 53),
             timestamp=dt.datetime.now(dt.UTC)
         )
+        
+        preview_url = data.get("preview_url")
+        preview_path = data.get("preview_path")
+        video_url = data.get("video_url")
         files = []
-        if data.get("video_url"):
-            video_id = extract_video_id(data["video_url"])
+
+        if preview_path and os.path.exists(preview_path):
+            filename = os.path.basename(preview_path)
+            embed.set_image(url=f"attachment://{filename}")
+            files.append(disnake.File(preview_path, filename=filename))
+        elif preview_url and await is_image_available(preview_url):
+            embed.set_image(url=preview_url)
+            if video_url:
+                embed.url = video_url
+        elif video_url:
+            video_id = extract_video_id(video_url)
             if video_id:
-                thumbnail = data.get("preview_url") or f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
-                if not await is_image_available(thumbnail):
-                    thumbnail = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
-                    if not await is_image_available(thumbnail):
-                        logger.warning(f"Не удалось загрузить превью для видео {video_id}.")
-                        thumbnail = None
-                if thumbnail:
-                    embed.url = data["video_url"]
+                thumbnail = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+                if await is_image_available(thumbnail):
+                    embed.url = video_url
                     embed.set_image(url=thumbnail)
-        if data.get("preview_path"):
-            files.append(disnake.File(data["preview_path"]))
-        view = create_social_buttons(data.get("video_url", ""))
+                else:
+                    thumbnail = f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg"
+                    if await is_image_available(thumbnail):
+                        embed.url = video_url
+                        embed.set_image(url=thumbnail)
+                    else:
+                        logger.warning(f"Не удалось загрузить превью для видео {video_url} (ID: {video_id}).")
+        
+        view = create_social_buttons(video_url or "")
+        
         await channel.send(content="@everyone", embed=embed, view=view, files=files)
         logger.info("📢 Сообщение из Telegram отправлено в Discord с упоминанием!")
+        
+        if preview_path and os.path.exists(preview_path):
+            try:
+                os.remove(preview_path)
+                logger.info(f"Удалён временный файл: {preview_path}")
+            except Exception as e:
+                logger.error(f"Ошибка при удалении файла {preview_path}: {e}")
+                
         return web.Response(text=WEB_SERVER_RESPONSE)
     except Exception as e:
-        logger.error(f"Ошибка при обработке запроса: {e}")
+        logger.error(f"Ошибка при обработке запроса: {e}", exc_info=True)
         return web.Response(status=500, text=WEB_SERVER_ERROR)
 
 
